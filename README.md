@@ -39,6 +39,10 @@ Either way the sandbox is created first if it's missing, and `exit` takes you ba
 
 For fully automatic setup, install the zsh hook. In a worktree that has a sandbox, every new Orca terminal then opens inside it, and `claude` (including agents Orca launches) runs inside it.
 
+**From Orca:** press Cmd+J and run **Docker Sandbox: Install zsh hook**. It copies the hook to `~/.local/share/orca-sbx/`, backs up `~/.zshrc` to `~/.zshrc.orca-sbx.bak`, and adds one `source` line. The plugin keeps the copy up to date when it updates.
+
+**By hand:**
+
 ```sh
 mkdir -p ~/.local/share/orca-sbx
 curl -fsSL https://raw.githubusercontent.com/MatsCornegoor/orca-sbx/v0.2.0/shell/orca-sbx.zsh \
@@ -51,7 +55,7 @@ Open a new terminal in a sandboxed worktree to try it.
 - It only acts in Orca terminals of linked worktrees that have a sandbox. Main checkouts and terminals outside Orca are left alone.
 - Each new terminal in a worktree waits for `sbx ls`: about 2 seconds, longer when `sbx` is just waking up, and never more than 15 seconds.
 - `exit` returns to your Mac. `command claude` runs Claude on your Mac.
-- To turn it off, add `export ORCA_SBX=off` to `~/.zshenv`. To uninstall, remove the `source` line from `~/.zshrc` and delete `~/.local/share/orca-sbx`.
+- To turn it off, add `export ORCA_SBX=off` to `~/.zshenv`. To uninstall, run **Docker Sandbox: Remove zsh hook** from Cmd+J, or remove the `source` line from `~/.zshrc` and delete `~/.local/share/orca-sbx`.
 
 ### Develop locally
 

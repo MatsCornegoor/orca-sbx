@@ -14,6 +14,7 @@ What we tried for giving every Orca worktree its own Docker Sandbox, what works,
 | New tab that opens in the sandbox | Orca Quick Commands (see below) | Not tested in Orca yet |
 | Shell or Claude in the sandbox from a shortcut | Plugin commands ⌘⌥B / ⌘⌥L | Same command worked in Orca from the earlier panel; shortcuts themselves not tested |
 | Every terminal and Claude in the sandbox automatically | Optional zsh hook (`shell/orca-sbx.zsh`, see README) | ✅ Simulated outside Orca (5 cases below); not tested in a real Orca terminal yet |
+| Install/remove the zsh hook from Cmd+J | Plugin commands `zsh-hook-install` / `zsh-hook-remove` | ✅ Tested outside Orca against a throwaway home folder; not run from Orca yet |
 
 ## Quick Commands setup
 
@@ -50,12 +51,21 @@ These are the same commands the plugin's shortcuts type (`sandboxCommand()` in `
 
 ### zsh hook
 
-Install it as described in the README, then:
+Install it from Cmd+J (**Docker Sandbox: Install zsh hook**) or by hand as described in the README, then:
 
 1. **Plain terminal:** open a new terminal in a sandboxed worktree. After about 2 seconds the prompt becomes the sandbox's; `hostname` prints the sandbox name. `exit` returns to the Mac.
 2. **Agent:** launch Claude from Orca in that worktree and ask it to run `uname -a`: Linux.
 3. **Main checkout:** open a terminal in the repo's main checkout. It opens on the Mac with no delay.
 4. **Outside Orca:** open your normal terminal app. Nothing changes.
+5. **Remove:** run **Docker Sandbox: Remove zsh hook** from Cmd+J. The two lines are gone from `~/.zshrc` (backup in `~/.zshrc.orca-sbx.bak`) and new terminals open on the Mac.
+
+Install/remove round trips, run against a throwaway home folder:
+
+| Starting `~/.zshrc` | Install twice, then remove |
+|---|---|
+| Ends with a newline | Restored byte for byte; hook folder removed |
+| Empty / missing | Restored; hook folder removed |
+| No newline at the end | Restored except for one added trailing newline (harmless) |
 
 Results of the simulated run (zsh started with Orca's environment variables, real `sbx`):
 
@@ -76,7 +86,7 @@ From a normal terminal you can also check a sandbox with `sbx exec <name> uname 
 | `orca.yaml` setup/archive scripts | Works, but per repo. `defaultTabs` only applies to the tabs opened at creation, needs `orca.yaml` committed in each repo, and an agent launched by Orca overrides the first tab's command. |
 | Plugin running `sbx` on worktree events | ✅ Used. Unofficial: Orca's plugin API has no process permission yet; it works because the plugin worker is plain Node. |
 | zsh hook in `~/.zshrc` (`shell/orca-sbx.zsh`) | ✅ Shipped as the optional setup. Every new terminal and every Claude Orca launches runs in the sandbox. Downsides: manual install, zsh only, ~2 s wait for new terminals in sandboxed worktrees (15 s timeout). Main checkouts are skipped. |
-| Plugin command that installs the zsh hook | Possible (one click for users) but edits `~/.zshrc` from a plugin. Not built. |
+| Plugin command that installs the zsh hook | ✅ Built: Cmd+J → Install / Remove zsh hook. Unofficial like the rest: the plugin edits `~/.zshrc` directly, only when the user runs the command. |
 | Sidebar panel with buttons | Worked, but panels can only type into an existing terminal and can't tell which one is in front. Removed in favor of Quick Commands. |
 | `terminal:send` on new terminals | Not possible: plugins get no "terminal opened" event and can't see what runs in a terminal. |
 | Adding an item to the **+** new-tab menu | Not possible from a plugin. Quick Commands (▶) is the closest official feature. |

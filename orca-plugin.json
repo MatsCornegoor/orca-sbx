@@ -21,6 +21,16 @@
         "id": "sbx-claude",
         "title": "Docker Sandbox: Start Claude in sandbox",
         "context": "worktree"
+      },
+      {
+        "id": "zsh-hook-install",
+        "title": "Docker Sandbox: Install zsh hook (every terminal in the sandbox)",
+        "context": "global"
+      },
+      {
+        "id": "zsh-hook-remove",
+        "title": "Docker Sandbox: Remove zsh hook",
+        "context": "global"
       }
     ],
     "keybindings": [

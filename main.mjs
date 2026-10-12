@@ -7,7 +7,10 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { basename, isAbsolute, relative } from 'node:path'
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
@@ -59,6 +62,52 @@ export function sandboxCommand(mode) {
   return ` ${base} && ${attach}`
 }
 
+// The optional zsh hook lives in a fixed place outside the plugin's install
+// dir (which is renamed per version), so ~/.zshrc can point at it.
+const HOOK_SOURCE = join(dirname(fileURLToPath(import.meta.url)), 'shell', 'orca-sbx.zsh')
+const HOOK_TARGET = join(homedir(), '.local', 'share', 'orca-sbx', 'orca-sbx.zsh')
+const ZSHRC = join(homedir(), '.zshrc')
+const HOOK_COMMENT = '# orca-sbx: open Orca worktree terminals inside their Docker Sandbox'
+const HOOK_LINE = 'source ~/.local/share/orca-sbx/orca-sbx.zsh'
+const HOOK_BLOCK = `\n${HOOK_COMMENT}\n${HOOK_LINE}\n`
+
+async function readZshrc() {
+  try {
+    return await readFile(ZSHRC, 'utf8')
+  } catch (err) {
+    if (err.code === 'ENOENT') return ''
+    throw err
+  }
+}
+
+export async function installZshHook() {
+  await mkdir(dirname(HOOK_TARGET), { recursive: true })
+  await copyFile(HOOK_SOURCE, HOOK_TARGET)
+  const rc = await readZshrc()
+  if (rc.split('\n').includes(HOOK_LINE)) return { changedZshrc: false }
+  if (rc) await writeFile(`${ZSHRC}.orca-sbx.bak`, rc)
+  if (rc === '') {
+    await writeFile(ZSHRC, HOOK_BLOCK.slice(1))
+  } else {
+    await writeFile(ZSHRC, `${rc}${rc.endsWith('\n') ? '' : '\n'}${HOOK_BLOCK}`)
+  }
+  return { changedZshrc: true }
+}
+
+export async function removeZshHook() {
+  const rc = await readZshrc()
+  // Undo exactly what install added; fall back to dropping the two lines if
+  // the user moved them.
+  const next = rc.includes(HOOK_BLOCK)
+    ? rc.replace(HOOK_BLOCK, '')
+    : rc.split('\n').filter((line) => line !== HOOK_LINE && line !== HOOK_COMMENT).join('\n')
+  if (next !== rc) {
+    await writeFile(`${ZSHRC}.orca-sbx.bak`, rc)
+    await writeFile(ZSHRC, next)
+  }
+  await rm(dirname(HOOK_TARGET), { recursive: true, force: true })
+}
+
 async function workspaceArgs(worktreePath) {
   const commonDir = await gitCommonDir(worktreePath)
   return commonDir ? [worktreePath, commonDir] : [worktreePath]
@@ -70,6 +119,38 @@ export default function activate(orca) {
 
   const seconds = (start) => `${Math.round((Date.now() - start) / 1000)}s`
   const errorText = (err) => (err.stderr || err.message).trim()
+
+  // Keep an installed hook in step with this plugin version.
+  if (existsSync(HOOK_TARGET)) {
+    copyFile(HOOK_SOURCE, HOOK_TARGET).catch((err) => orca.log(`hook refresh failed: ${err.message}`))
+  }
+
+  orca.commands.register('zsh-hook-install', async () => {
+    try {
+      const { changedZshrc } = await installZshHook()
+      notify(
+        'zsh hook installed',
+        changedZshrc
+          ? 'Added one line to ~/.zshrc (backup: ~/.zshrc.orca-sbx.bak). Open a new terminal in a sandboxed worktree.'
+          : 'Hook updated; ~/.zshrc already loads it.'
+      )
+      return { ok: true }
+    } catch (err) {
+      notify('zsh hook not installed', err.message)
+      return { ok: false }
+    }
+  })
+
+  orca.commands.register('zsh-hook-remove', async () => {
+    try {
+      await removeZshHook()
+      notify('zsh hook removed', 'New terminals open on your Mac again.')
+      return { ok: true }
+    } catch (err) {
+      notify('zsh hook not removed', err.message)
+      return { ok: false }
+    }
+  })
 
   orca.events.on('worktree.created', async ({ path }) => {
     const name = sandboxName(path)
