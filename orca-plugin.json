@@ -1,9 +1,9 @@
 {
   "manifestVersion": 1,
-  "id": "orca-sbx",
+  "id": "docker-sandboxes",
   "publisher": "heartheyouth",
   "name": "Docker Sandboxes",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Gives every Orca worktree its own Docker Sandbox (sbx). Creates the sandbox when the worktree is created and removes it when the worktree is removed.",
   "engines": { "orca": ">=1.4.0" },
   "pluginApi": 1,

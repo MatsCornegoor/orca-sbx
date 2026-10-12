@@ -11,10 +11,34 @@ The main repo's `.git` is mounted too because a linked worktree's `.git` file po
 
 ## Install
 
-1. `brew install --cask sbx`, then `sbx login`.
-2. Orca → Settings → Plugins → Development → add this folder, then approve the permissions.
+Current version: **v0.1.1**
+
+1. Install Docker Sandboxes and sign in to Docker (a one-time step that `sbx` requires, even though sandboxes run locally):
+   ```sh
+   brew install --cask sbx
+   sbx login
+   ```
+2. In Orca, open Settings → Plugins → **Install plugin**, choose the **Git URL** tab and enter:
+   ```
+   https://github.com/MatsCornegoor/orca-sbx.git#v0.1.1
+   ```
+   The `#v0.1.1` pins the install to this release.
+3. Review the permissions and enable the plugin.
+4. Create a worktree. A "Docker Sandbox ready" notification appears when its sandbox is up. The first one takes a minute or two while the agent image downloads. Check with `sbx ls`.
+
+### Develop locally
+
+Orca → Settings → Plugins → Development → add your clone of this repo. If a code change doesn't take effect, turn the plugin off and on.
 
 Change the agent with `AGENT` at the top of `main.mjs`.
+
+### Releasing
+
+Bump `version` in `orca-plugin.json`, update the version above, commit, then tag and push:
+
+```sh
+git tag -a v0.1.2 -m v0.1.2 && git push origin v0.1.2
+```
 
 ## Caveat
 
