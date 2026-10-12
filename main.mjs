@@ -31,19 +31,27 @@ export function sandboxName(worktreePath) {
 }
 
 // A linked worktree's .git is a pointer into the main repo's .git, so the
-// sandbox also needs that directory mounted (writable: commits land there).
-async function gitCommonDir(worktreePath) {
+// sandbox also needs that directory. Returns null for a main checkout.
+async function gitDirs(worktreePath) {
   try {
     const { stdout } = await run('git', [
-      '-C', worktreePath, 'rev-parse', '--path-format=absolute', '--git-common-dir'
+      '-C', worktreePath, 'rev-parse', '--path-format=absolute', '--git-common-dir', '--git-dir'
     ])
-    const dir = stdout.trim()
-    const rel = relative(worktreePath, dir)
+    const [common, own] = stdout.trim().split('\n')
+    const rel = relative(worktreePath, common)
     const insideWorktree = rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
-    return insideWorktree ? null : dir
+    return insideWorktree ? null : { common, own }
   } catch {
     return null
   }
+}
+
+// The main repo's .git is mounted read-only so the sandbox can't plant hooks
+// or config that run on the Mac; only what commits, branches, stash and
+// fetch write stays writable: objects, refs, reflogs and this worktree's own
+// git dir (HEAD, index). sbx can only mount directories, not single files.
+export function gitMounts({ common, own }) {
+  return [`${common}:ro`, `${common}/objects`, `${common}/refs`, `${common}/logs`, own]
 }
 
 // Shell command typed into a worktree terminal: work out the sandbox name from
@@ -54,9 +62,10 @@ export function sandboxCommand(mode) {
   const base = [
     'd=$(git rev-parse --show-toplevel)',
     'c=$(git rev-parse --path-format=absolute --git-common-dir)',
-    '{ case "$c" in "$d"/*) c= ;; esac; }',
+    'g=$(git rev-parse --absolute-git-dir)',
+    '{ case "$c" in "$d"/*) set -- "$d" ;; *) mkdir -p "$c/logs"; set -- "$d" "\${c}:ro" "$c/objects" "$c/refs" "$c/logs" "$g" ;; esac; }',
     `n="orca-$(printf %s "$(basename "$d")" | tr -c 'A-Za-z0-9.-' '-')-$(printf %s "$d" | shasum | cut -c1-6)"`,
-    `{ sbx ls -q | grep -qx -- "$n" || sbx create --name "$n" ${AGENT} "$d" \${c:+"$c"}; }`
+    `{ sbx ls -q | grep -qx -- "$n" || sbx create --name "$n" ${AGENT} "$@"; }`
   ].join(' && ')
   const attach = mode === 'shell' ? 'sbx exec -it -w "$PWD" "$n" bash -l' : 'sbx run "$n"'
   return ` ${base} && ${attach}`
@@ -109,8 +118,12 @@ export async function removeZshHook() {
 }
 
 async function workspaceArgs(worktreePath) {
-  const commonDir = await gitCommonDir(worktreePath)
-  return commonDir ? [worktreePath, commonDir] : [worktreePath]
+  const dirs = await gitDirs(worktreePath)
+  if (!dirs) return [worktreePath]
+  // A fresh repo may have no reflog dir yet, and the sandbox can't create it
+  // under the read-only mount.
+  await mkdir(`${dirs.common}/logs`, { recursive: true })
+  return [worktreePath, ...gitMounts(dirs)]
 }
 
 export default function activate(orca) {

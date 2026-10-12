@@ -10,6 +10,7 @@ What we tried for giving every Orca worktree its own Docker Sandbox, what works,
 | Sandbox removed when a worktree is removed | Plugin, `worktree.removed` event → `sbx rm --force` | ✅ Tested outside Orca |
 | Notifications (creating, ready, removed, failed) | Plugin | ✅ Tested outside Orca |
 | Git works inside the sandbox | Main repo's `.git` is mounted too | ✅ Commit made in the sandbox shows up on the Mac |
+| Git hooks and config can't be changed from the sandbox | Main repo's `.git` mounted read-only; only objects, refs, logs and the worktree's git dir writable | ✅ Tested on a throwaway repo (see below); typed command (Quick Commands/shortcuts) not tested |
 | Isolation | Sandbox sees only the worktree and `.git` | ✅ `uname` says Linux, `~/Documents` not found |
 | New tab that opens in the sandbox | Orca Quick Commands (see below) | Not tested in Orca yet |
 | Shell or Claude in the sandbox from a shortcut | Plugin commands ⌘⌥B / ⌘⌥L | Same command worked in Orca from the earlier panel; shortcuts themselves not tested |
@@ -23,16 +24,16 @@ Quick Commands are an official Orca feature: the ▶ button next to **+** in the
 **Sandbox shell**
 
 ```
-d=$(git rev-parse --show-toplevel) && c=$(git rev-parse --path-format=absolute --git-common-dir) && { case "$c" in "$d"/*) c= ;; esac; } && n="orca-$(printf %s "$(basename "$d")" | tr -c 'A-Za-z0-9.-' '-')-$(printf %s "$d" | shasum | cut -c1-6)" && { sbx ls -q | grep -qx -- "$n" || sbx create --name "$n" claude "$d" ${c:+"$c"}; } && sbx exec -it -w "$PWD" "$n" bash -l
+d=$(git rev-parse --show-toplevel) && c=$(git rev-parse --path-format=absolute --git-common-dir) && g=$(git rev-parse --absolute-git-dir) && { case "$c" in "$d"/*) set -- "$d" ;; *) mkdir -p "$c/logs"; set -- "$d" "${c}:ro" "$c/objects" "$c/refs" "$c/logs" "$g" ;; esac; } && n="orca-$(printf %s "$(basename "$d")" | tr -c 'A-Za-z0-9.-' '-')-$(printf %s "$d" | shasum | cut -c1-6)" && { sbx ls -q | grep -qx -- "$n" || sbx create --name "$n" claude "$@"; } && sbx exec -it -w "$PWD" "$n" bash -l
 ```
 
 **Claude in sandbox**
 
 ```
-d=$(git rev-parse --show-toplevel) && c=$(git rev-parse --path-format=absolute --git-common-dir) && { case "$c" in "$d"/*) c= ;; esac; } && n="orca-$(printf %s "$(basename "$d")" | tr -c 'A-Za-z0-9.-' '-')-$(printf %s "$d" | shasum | cut -c1-6)" && { sbx ls -q | grep -qx -- "$n" || sbx create --name "$n" claude "$d" ${c:+"$c"}; } && sbx run "$n"
+d=$(git rev-parse --show-toplevel) && c=$(git rev-parse --path-format=absolute --git-common-dir) && g=$(git rev-parse --absolute-git-dir) && { case "$c" in "$d"/*) set -- "$d" ;; *) mkdir -p "$c/logs"; set -- "$d" "${c}:ro" "$c/objects" "$c/refs" "$c/logs" "$g" ;; esac; } && n="orca-$(printf %s "$(basename "$d")" | tr -c 'A-Za-z0-9.-' '-')-$(printf %s "$d" | shasum | cut -c1-6)" && { sbx ls -q | grep -qx -- "$n" || sbx create --name "$n" claude "$@"; } && sbx run "$n"
 ```
 
-These are the same commands the plugin's shortcuts type (`sandboxCommand()` in `main.mjs`). They work out the sandbox name from the worktree, create the sandbox if it's missing (this check takes about 1.5 seconds, up to 10 when `sbx` is waking up), then open a shell or Claude in it.
+Paste each as one line. These are the same commands the plugin's shortcuts type (`sandboxCommand()` in `main.mjs`). They work out the sandbox name from the worktree, create the sandbox if it's missing (this check takes about 1.5 seconds, up to 10 when `sbx` is waking up), then open a shell or Claude in it.
 
 ## How to test
 
@@ -79,6 +80,40 @@ Results of the simulated run (zsh started with Orca's environment variables, rea
 
 From a normal terminal you can also check a sandbox with `sbx exec <name> uname -a`.
 
+## Git protection
+
+A linked worktree's `.git` points into the main repo's `.git`, so the sandbox needs that folder for git to work. Writable, it would let anything in the sandbox plant a git hook or config (`core.hooksPath`, `core.fsmonitor`) that runs on the Mac the next time git runs there, including Orca's own background git calls.
+
+So the main repo's `.git` is mounted **read-only**, with only these folders writable on top:
+
+| Writable | Needed for |
+|---|---|
+| `.git/objects` | New commits, stash, fetched objects |
+| `.git/refs` | Branches, tags, remote-tracking refs |
+| `.git/logs` | Reflogs |
+| `.git/worktrees/<name>` | This worktree's `HEAD`, index and `FETCH_HEAD` |
+
+`sbx` can only mount folders, not single files, which is why `.git/config` can't be protected on its own. Results on a throwaway repo with these mounts:
+
+| Inside the sandbox | Result |
+|---|---|
+| `git status`, commit, amend, log, diff | ✅ Works |
+| Create and switch branches, stash | ✅ Works |
+| `git fetch`, `git pull`, `git push` | ✅ Works |
+| `git gc` | ❌ Blocked (needs to write `.git` itself); run it on the Mac |
+| Write to `.git/hooks` | ❌ Blocked |
+| Write to `.git/config`, `git config`, `git config --worktree` | ❌ Blocked |
+| Write to `.git/info` | ❌ Blocked |
+
+On the Mac afterwards: the sandbox's commits and branch were there, and no hook or `core.hooksPath` had been added.
+
+**Limits:**
+
+- This blocks the easy routes, not all of them. The worktree folder and `.git/worktrees/<name>` must stay writable, and both hold the pointer files git follows to find the repo. Something in the sandbox could point them at a git folder it controls, whose config would then apply when git runs in that worktree on the Mac. Not tested; it follows from how git reads those files.
+- Main checkouts (sandboxes made there via Quick Commands or a shortcut) get no protection: their `.git` holds `HEAD` and the index, so it has to stay writable.
+- Sandboxes created before this change keep the old fully writable mount. Remove and recreate them (`sbx rm <name>`, then use a Quick Command or shortcut) to get the protection.
+- Commits from inside the plugin-created sandbox weren't rechecked after the change; the mounts were (`sbx ls --json` lists exactly the ones above).
+
 ## Options we looked at
 
 | Option | Result |
@@ -98,7 +133,7 @@ From a normal terminal you can also check a sandbox with `sbx exec <name> uname 
 - **Plugin ID:** IDs starting with `orca-` are reserved for official Orca plugins; the install fails with a generic error. Ours is `docker-sandboxes`.
 - **Docker sign-in:** `sbx` requires `sbx login` even though sandboxes run locally.
 - **Agent status:** Orca may not show working/done status for Claude running in the sandbox, and Claude's sessions are stored inside the sandbox. Not checked.
-- **Shared `.git`:** sandboxes can write to the main repo's `.git`, including `.git/hooks` and `.git/config`, which run on the Mac the next time git runs there. The sandbox protects your files, but isn't a hard security boundary. Possible fix to test: mount `.git/hooks` and `.git/config` read-only.
+- **Shared `.git`:** mostly handled by the read-only mount (see Git protection), but not a hard security boundary.
 - **zsh hook and main checkouts:** the hook skips main checkouts to keep their terminals fast, so a sandbox made for a main checkout (via Quick Commands or a shortcut) isn't entered automatically.
 - **Shortcuts pick the first terminal:** with several terminals in a worktree, ⌘⌥B / ⌘⌥L may type into the wrong one. Quick Commands avoid this.
 
