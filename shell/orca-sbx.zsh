@@ -23,15 +23,11 @@
   local slug=${${top:t}//[^A-Za-z0-9.-]/-}
   local name="orca-$slug-$(printf %s "$top" | shasum | cut -c1-6)"
 
-  # `sbx ls` takes ~3s; give up after 5s so a stuck daemon can't freeze
-  # every new terminal.
+  # `sbx ls` takes ~1.5s, ~10s when its daemon wakes up. perl's alarm (macOS
+  # has no `timeout`) kills it after 15s so a stuck daemon can't freeze every
+  # new terminal.
   local sandboxes
-  sandboxes=$(
-    sbx ls -q 2>/dev/null &
-    local pid=$!
-    ( sleep 5 && kill $pid ) >/dev/null 2>&1 &!
-    wait $pid
-  )
+  sandboxes=$(perl -e 'alarm 15; exec @ARGV' sbx ls -q 2>/dev/null)
   [[ ${${(f)sandboxes}[(Ie)$name]} -gt 0 ]] || return 0
 
   typeset -g ORCA_SBX_NAME=$name

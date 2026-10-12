@@ -35,6 +35,24 @@ Terminals still open on your Mac. Two ways to get into the sandbox:
 
 Either way the sandbox is created first if it's missing, and `exit` takes you back to your Mac.
 
+### Optional: open every terminal in the sandbox (zsh)
+
+For fully automatic setup, install the zsh hook. In a worktree that has a sandbox, every new Orca terminal then opens inside it, and `claude` (including agents Orca launches) runs inside it.
+
+```sh
+mkdir -p ~/.local/share/orca-sbx
+curl -fsSL https://raw.githubusercontent.com/MatsCornegoor/orca-sbx/v0.2.0/shell/orca-sbx.zsh \
+  -o ~/.local/share/orca-sbx/orca-sbx.zsh
+echo 'source ~/.local/share/orca-sbx/orca-sbx.zsh' >> ~/.zshrc
+```
+
+Open a new terminal in a sandboxed worktree to try it.
+
+- It only acts in Orca terminals of linked worktrees that have a sandbox. Main checkouts and terminals outside Orca are left alone.
+- Each new terminal in a worktree waits for `sbx ls`: about 2 seconds, longer when `sbx` is just waking up, and never more than 15 seconds.
+- `exit` returns to your Mac. `command claude` runs Claude on your Mac.
+- To turn it off, add `export ORCA_SBX=off` to `~/.zshenv`. To uninstall, remove the `source` line from `~/.zshrc` and delete `~/.local/share/orca-sbx`.
+
 ### Develop locally
 
 Orca → Settings → Plugins → Development → add your clone of this repo. If a code change doesn't take effect, turn the plugin off and on.

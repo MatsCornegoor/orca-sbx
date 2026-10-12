@@ -13,6 +13,7 @@ What we tried for giving every Orca worktree its own Docker Sandbox, what works,
 | Isolation | Sandbox sees only the worktree and `.git` | ✅ `uname` says Linux, `~/Documents` not found |
 | New tab that opens in the sandbox | Orca Quick Commands (see below) | Not tested in Orca yet |
 | Shell or Claude in the sandbox from a shortcut | Plugin commands ⌘⌥B / ⌘⌥L | Same command worked in Orca from the earlier panel; shortcuts themselves not tested |
+| Every terminal and Claude in the sandbox automatically | Optional zsh hook (`shell/orca-sbx.zsh`, see README) | ✅ Simulated outside Orca (5 cases below); not tested in a real Orca terminal yet |
 
 ## Quick Commands setup
 
@@ -30,7 +31,7 @@ d=$(git rev-parse --show-toplevel) && c=$(git rev-parse --path-format=absolute -
 d=$(git rev-parse --show-toplevel) && c=$(git rev-parse --path-format=absolute --git-common-dir) && { case "$c" in "$d"/*) c= ;; esac; } && n="orca-$(printf %s "$(basename "$d")" | tr -c 'A-Za-z0-9.-' '-')-$(printf %s "$d" | shasum | cut -c1-6)" && { sbx ls -q | grep -qx -- "$n" || sbx create --name "$n" claude "$d" ${c:+"$c"}; } && sbx run "$n"
 ```
 
-These are the same commands the plugin's shortcuts type (`sandboxCommand()` in `main.mjs`). They work out the sandbox name from the worktree, create the sandbox if it's missing (this check takes about 3 seconds), then open a shell or Claude in it.
+These are the same commands the plugin's shortcuts type (`sandboxCommand()` in `main.mjs`). They work out the sandbox name from the worktree, create the sandbox if it's missing (this check takes about 1.5 seconds, up to 10 when `sbx` is waking up), then open a shell or Claude in it.
 
 ## How to test
 
@@ -47,6 +48,25 @@ These are the same commands the plugin's shortcuts type (`sandboxCommand()` in `
 5. **Git:** commit something inside the sandbox; the commit appears on the branch in Orca.
 6. **Remove:** delete the worktree. Expect "Docker Sandbox removed", and `sbx ls` no longer lists it.
 
+### zsh hook
+
+Install it as described in the README, then:
+
+1. **Plain terminal:** open a new terminal in a sandboxed worktree. After about 2 seconds the prompt becomes the sandbox's; `hostname` prints the sandbox name. `exit` returns to the Mac.
+2. **Agent:** launch Claude from Orca in that worktree and ask it to run `uname -a`: Linux.
+3. **Main checkout:** open a terminal in the repo's main checkout. It opens on the Mac with no delay.
+4. **Outside Orca:** open your normal terminal app. Nothing changes.
+
+Results of the simulated run (zsh started with Orca's environment variables, real `sbx`):
+
+| Case | Result | Time |
+|---|---|---|
+| Plain terminal in the worktree | Sandbox shell queued for the first prompt | 2 s |
+| Agent terminal | `claude` routed to the sandbox, no shell switch | 2 s |
+| Main checkout | Skipped | 0 s |
+| Outside Orca | Skipped | 0 s |
+| `sbx` hangs (fake `sbx` that sleeps 60 s) | Gives up, normal Mac shell, no leftover processes | 15 s |
+
 From a normal terminal you can also check a sandbox with `sbx exec <name> uname -a`.
 
 ## Options we looked at
@@ -55,7 +75,7 @@ From a normal terminal you can also check a sandbox with `sbx exec <name> uname 
 |---|---|
 | `orca.yaml` setup/archive scripts | Works, but per repo. `defaultTabs` only applies to the tabs opened at creation, needs `orca.yaml` committed in each repo, and an agent launched by Orca overrides the first tab's command. |
 | Plugin running `sbx` on worktree events | ✅ Used. Unofficial: Orca's plugin API has no process permission yet; it works because the plugin worker is plain Node. |
-| zsh hook in `~/.zshrc` (`shell/orca-sbx.zsh`) | Works: every new terminal and every Claude Orca launches runs in the sandbox. Downsides: manual install, zsh only, adds ~3 s to every Orca terminal, no timeout if `sbx` hangs. Not shipped; kept in `shell/` for later. |
+| zsh hook in `~/.zshrc` (`shell/orca-sbx.zsh`) | ✅ Shipped as the optional setup. Every new terminal and every Claude Orca launches runs in the sandbox. Downsides: manual install, zsh only, ~2 s wait for new terminals in sandboxed worktrees (15 s timeout). Main checkouts are skipped. |
 | Plugin command that installs the zsh hook | Possible (one click for users) but edits `~/.zshrc` from a plugin. Not built. |
 | Sidebar panel with buttons | Worked, but panels can only type into an existing terminal and can't tell which one is in front. Removed in favor of Quick Commands. |
 | `terminal:send` on new terminals | Not possible: plugins get no "terminal opened" event and can't see what runs in a terminal. |
@@ -69,6 +89,7 @@ From a normal terminal you can also check a sandbox with `sbx exec <name> uname 
 - **Docker sign-in:** `sbx` requires `sbx login` even though sandboxes run locally.
 - **Agent status:** Orca may not show working/done status for Claude running in the sandbox, and Claude's sessions are stored inside the sandbox. Not checked.
 - **Shared `.git`:** sandboxes can write to the main repo's `.git`, including `.git/hooks` and `.git/config`, which run on the Mac the next time git runs there. The sandbox protects your files, but isn't a hard security boundary. Possible fix to test: mount `.git/hooks` and `.git/config` read-only.
+- **zsh hook and main checkouts:** the hook skips main checkouts to keep their terminals fast, so a sandbox made for a main checkout (via Quick Commands or a shortcut) isn't entered automatically.
 - **Shortcuts pick the first terminal:** with several terminals in a worktree, ⌘⌥B / ⌘⌥L may type into the wrong one. Quick Commands avoid this.
 
 ## Ideas for Orca (feature requests)
