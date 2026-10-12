@@ -3,21 +3,59 @@
   "id": "docker-sandboxes",
   "publisher": "heartheyouth",
   "name": "Docker Sandboxes",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Gives every Orca worktree its own Docker Sandbox (sbx). Creates the sandbox when the worktree is created and removes it when the worktree is removed.",
-  "engines": { "orca": ">=1.4.0" },
+  "engines": {
+    "orca": ">=1.4.0"
+  },
   "pluginApi": 1,
   "main": "main.mjs",
   "contributes": {
     "commands": [
-      { "id": "sbx-run", "title": "Docker Sandbox: Run agent in this worktree", "context": "worktree" }
+      {
+        "id": "sbx-shell",
+        "title": "Docker Sandbox: Open shell in sandbox",
+        "context": "worktree"
+      },
+      {
+        "id": "sbx-claude",
+        "title": "Docker Sandbox: Start Claude in sandbox",
+        "context": "worktree"
+      }
     ],
-    "events": [{ "on": "worktree.created" }, { "on": "worktree.removed" }]
+    "keybindings": [
+      {
+        "command": "sbx-shell",
+        "key": "Mod+Alt+B",
+        "when": "worktree"
+      },
+      {
+        "command": "sbx-claude",
+        "key": "Mod+Alt+L",
+        "when": "worktree"
+      }
+    ],
+    "events": [
+      {
+        "on": "worktree.created"
+      },
+      {
+        "on": "worktree.removed"
+      }
+    ]
   },
   "capabilities": [
-    { "kind": "workspace:read" },
-    { "kind": "terminal:send" },
-    { "kind": "notifications:show" },
-    { "kind": "events:subscribe" }
+    {
+      "kind": "workspace:read"
+    },
+    {
+      "kind": "terminal:send"
+    },
+    {
+      "kind": "notifications:show"
+    },
+    {
+      "kind": "events:subscribe"
+    }
   ]
 }

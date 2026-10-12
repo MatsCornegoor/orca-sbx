@@ -5,7 +5,7 @@ Orca plugin that gives every worktree its own [Docker Sandbox](https://docs.dock
 - **Worktree created** → `sbx create --name orca-<worktree>-<hash> claude <worktree> <main-repo>/.git`
 - **Worktree removed** → `sbx rm --force orca-<worktree>-<hash>`
 - **Notifications** when a sandbox is being created, is ready (with how long it took), is removed, or fails.
-- **Command "Docker Sandbox: Run agent in this worktree"** (Cmd+J) → types `sbx run …` into the worktree's terminal, creating the sandbox first if it's missing.
+- **Shortcuts** to open a shell or Claude inside the sandbox (see below).
 
 The main repo's `.git` is mounted too because a linked worktree's `.git` file points into it. That mount is writable, so sandboxes share the repo's git database.
 
@@ -25,6 +25,15 @@ Current version: **v0.1.1**
    The `#v0.1.1` pins the install to this release.
 3. Review the permissions and enable the plugin.
 4. Create a worktree. A "Docker Sandbox ready" notification appears when its sandbox is up. The first one takes a minute or two while the agent image downloads. Check with `sbx ls`.
+
+### Use the sandbox
+
+Terminals still open on your Mac. Two ways to get into the sandbox:
+
+- **Quick Commands (recommended):** add the two commands from [testing.md](testing.md#quick-commands-setup) in Settings → Quick Commands. The ▶ button next to **+** in the tab bar then opens a new tab that's already in the sandbox.
+- **Shortcuts:** open a terminal in the worktree, then press ⌘⌥B for a sandbox shell or ⌘⌥L for Claude in the sandbox (also in Cmd+J). The plugin types the command into the worktree's first terminal, so this works best with one terminal open.
+
+Either way the sandbox is created first if it's missing, and `exit` takes you back to your Mac.
 
 ### Develop locally
 

@@ -43,6 +43,22 @@ async function gitCommonDir(worktreePath) {
   }
 }
 
+// Shell command typed into a worktree terminal: work out the sandbox name from
+// the repo top level (mirroring sandboxName()), create the sandbox if it is
+// missing, then open a shell or the agent in it. The leading space keeps it out
+// of shell history.
+export function sandboxCommand(mode) {
+  const base = [
+    'd=$(git rev-parse --show-toplevel)',
+    'c=$(git rev-parse --path-format=absolute --git-common-dir)',
+    '{ case "$c" in "$d"/*) c= ;; esac; }',
+    `n="orca-$(printf %s "$(basename "$d")" | tr -c 'A-Za-z0-9.-' '-')-$(printf %s "$d" | shasum | cut -c1-6)"`,
+    `{ sbx ls -q | grep -qx -- "$n" || sbx create --name "$n" ${AGENT} "$d" \${c:+"$c"}; }`
+  ].join(' && ')
+  const attach = mode === 'shell' ? 'sbx exec -it -w "$PWD" "$n" bash -l' : 'sbx run "$n"'
+  return ` ${base} && ${attach}`
+}
+
 async function workspaceArgs(worktreePath) {
   const commonDir = await gitCommonDir(worktreePath)
   return commonDir ? [worktreePath, commonDir] : [worktreePath]
@@ -84,25 +100,18 @@ export default function activate(orca) {
     }
   })
 
-  // Types the attach command into the focused worktree's terminal, creating
-  // the sandbox first if it is missing (worktrees made before the plugin was
-  // installed, or a create that failed). The name is computed in the shell from
-  // the repo top level, mirroring sandboxName().
-  orca.commands.register('sbx-run', async () => {
+  // Types the command into a terminal of the focused worktree. Plugins can't
+  // open terminals or see which one is in front, so this uses the first.
+  const sendToTerminal = (mode) => async () => {
     const ctx = await orca.host.call('workspace.readContext', {})
     const terminalId = ctx?.terminals?.[0]?.id
     if (!terminalId) {
       notify('Docker Sandbox', 'Open a terminal in this worktree first.')
       return { ok: false }
     }
-    const text = [
-      'd=$(git rev-parse --show-toplevel)',
-      'c=$(git rev-parse --path-format=absolute --git-common-dir)',
-      'case "$c" in "$d"/*) c= ;; esac',
-      `n="orca-$(printf %s "$(basename "$d")" | tr -c 'A-Za-z0-9.-' '-')-$(printf %s "$d" | shasum | cut -c1-6)"`,
-      `if ${sbx} ls -q | grep -qx "$n"; then ${sbx} run "$n"; else ${sbx} run --name "$n" ${AGENT} "$d" \${c:+"$c"}; fi`
-    ].join('; ')
-    await orca.host.call('terminal.sendText', { terminalId, text, enter: true })
+    await orca.host.call('terminal.sendText', { terminalId, text: sandboxCommand(mode), enter: true })
     return { ok: true }
-  })
+  }
+  orca.commands.register('sbx-shell', sendToTerminal('shell'))
+  orca.commands.register('sbx-claude', sendToTerminal('claude'))
 }
