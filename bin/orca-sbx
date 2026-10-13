@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# orca-sbx: one Docker Sandbox per Orca project, reached by Orca over SSH.
+#
+# The sandbox mounts the project's main checkout and its Orca worktree folder,
+# so every worktree, now and later, is inside it. Orca connects through the
+# SSH config that `sbx setup ssh` writes: host <name>.sbx, user agent.
+set -euo pipefail
+
+AGENT=${ORCA_SBX_AGENT:-claude}
+WORKSPACES=${ORCA_WORKSPACES:-$HOME/orca/workspaces}
+
+usage() {
+  cat <<EOF
+Usage: orca-sbx [command]
+
+Run inside an Orca project (main checkout or any of its worktrees).
+
+  up        Create the sandbox for this project (default)
+  shell     Open a shell in the sandbox, in the current folder
+  ls        List sandboxes made for Orca projects
+  stop      Stop this project's sandbox (or: stop NAME)
+  rm        Remove this project's sandbox (or: rm NAME)
+  setup     One-time: sign in, enable SSH, store your GitHub login
+
+Env: ORCA_SBX_AGENT (default: claude), ORCA_WORKSPACES (default: ~/orca/workspaces)
+EOF
+}
+
+die() { echo "orca-sbx: $*" >&2; exit 1; }
+
+# Sets project (main checkout), repo, worktrees and name from the current dir.
+# The name doubles as a hostname (<name>.sbx), so keep it to [a-z0-9-].
+resolve() {
+  local common
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+    die "not inside a git repo"
+  project=$(dirname "$common")
+  repo=$(basename "$project")
+  worktrees="$WORKSPACES/$repo"
+  name=$(printf %s "$repo" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-' '-' | sed 's/^-*//;s/-*$//')
+  [[ -n $name ]] || die "can't make a sandbox name from '$repo'"
+}
+
+exists() { sbx ls -q | grep -qx -- "$1"; }
+
+cmd_up() {
+  resolve
+  if exists "$name"; then
+    echo "Sandbox $name already exists."
+  else
+    mkdir -p "$worktrees"
+    sbx create --name "$name" "$AGENT" "$project" "$worktrees"
+    # The GitHub secret is only added to HTTPS requests, so send git@github.com
+    # remotes over HTTPS inside the sandbox. The repo's own config is untouched.
+    sbx exec "$name" git config --global url."https://github.com/".insteadOf git@github.com: ||
+      echo "orca-sbx: couldn't set git to use HTTPS for GitHub in $name" >&2
+  fi
+  echo
+  echo "Add it in Orca: Settings → SSH → Add Target"
+  echo "  host: $name.sbx"
+  echo "  user: agent"
+  echo "  identity file: (leave empty)"
+}
+
+cmd_shell() {
+  resolve
+  exists "$name" || die "no sandbox for $repo yet; run: orca-sbx up"
+  exec sbx exec -it -w "$PWD" "$name" bash -l
+}
+
+# Orca sandboxes are the ones that mount a folder under $WORKSPACES.
+cmd_ls() {
+  sbx ls | awk -v ws="$WORKSPACES/" 'NR == 1 || index($0, ws)'
+}
+
+# stop/rm act on the named sandbox, or on this project's when none is given.
+target() {
+  if [[ -n ${1:-} ]]; then name=$1; else resolve; fi
+}
+
+cmd_stop() { target "${1:-}"; sbx stop "$name"; }
+
+# sbx rm asks for confirmation itself.
+cmd_rm() { target "${1:-}"; sbx rm "$name"; }
+
+cmd_setup() {
+  sbx ls -q >/dev/null 2>&1 || sbx login
+
+  # SSH access is an experimental sbx feature, off by default, and the daemon
+  # only reads the setting at startup.
+  if ! sbx settings get feature.ssh 2>/dev/null | grep -q '"enabled":true'; then
+    echo "Enabling sbx SSH access (feature.ssh) and restarting the sbx daemon…"
+    sbx settings set feature.ssh true
+    sbx daemon restart
+  fi
+  sbx setup ssh
+
+  # Store the GitHub login as a command, so it follows `gh` on this Mac and
+  # the token never enters a sandbox.
+  if sbx secret ls 2>/dev/null | awk '$1 == "(global)" && $3 == "github"' | grep -q .; then
+    echo "GitHub secret already stored."
+  elif command -v gh >/dev/null && gh auth status >/dev/null 2>&1; then
+    sbx secret set github --command "$(command -v gh) auth token"
+    echo "GitHub secret stored (follows: gh auth token)."
+  else
+    echo "Skipped GitHub: log in with \`gh auth login\`, then run orca-sbx setup again."
+  fi
+
+  if sbx secret ls 2>/dev/null | awk '$1 == "(global)" && $3 == "anthropic"' | grep -q .; then
+    echo "Claude login already stored."
+  else
+    echo "Claude: run /login once in a sandboxed Claude, or: sbx secret set anthropic"
+  fi
+}
+
+case ${1:-up} in
+  up) cmd_up ;;
+  shell) cmd_shell ;;
+  ls) cmd_ls ;;
+  stop) cmd_stop "${2:-}" ;;
+  rm) cmd_rm "${2:-}" ;;
+  setup) cmd_setup ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; exit 1 ;;
+esac

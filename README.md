@@ -1,155 +1,128 @@
 # orca-sbx
 
-An [Orca](https://www.onorca.dev/) plugin that gives every worktree its own [Docker Sandbox](https://docs.docker.com/ai/sandboxes/): a local microVM where your shell and Claude can run without access to the rest of your Mac.
+A small command that gives each [Orca](https://www.onorca.dev/) project its own [Docker Sandbox](https://docs.docker.com/ai/sandboxes/): a local microVM where your terminals, agents and git run without access to the rest of your Mac.
 
-- **Automatic:** creating a worktree in Orca creates its sandbox; removing the worktree removes it.
-- **Isolated:** the sandbox sees only that worktree and the git data it needs. Not your home folder, not other projects.
-- **Git keeps working:** commit, branch, stash, fetch and push from inside the sandbox; the results show up in Orca as usual.
-- **Three ways in:** Quick Commands, keyboard shortcuts, or an optional zsh hook that opens every terminal in the sandbox.
+Orca connects to the sandbox over SSH, like any remote host. Every worktree you create on it, and every agent Orca starts in it, runs inside the sandbox. No plugin, no shell hooks.
 
-Current version: **v0.2.0** · macOS · Orca 1.4 or newer
+- **One sandbox per project**, shared by the main checkout and all its worktrees.
+- **Your code stays on your Mac.** The sandbox sees the project folder and its worktree folder, nothing else; changes go both ways.
+- **Logins stay on your Mac.** Your Claude subscription and GitHub login are stored with `sbx secret` and added to requests on the way out. The tokens never enter the sandbox.
+- **No keys, no ports.** `sbx` handles SSH itself; there's no sshd to run and nothing listening on your network.
 
-## Requirements
-
-- [Orca](https://www.onorca.dev/) 1.4.0 or newer
-- Docker Sandboxes (`sbx`), signed in to a Docker account. Sandboxes run locally, but `sbx` requires the sign-in.
-
-```sh
-brew install --cask sbx
-sbx login
-```
+macOS · Orca 1.4 or newer · `sbx` 0.47 or newer
 
 ## Install
 
-1. In Orca, open **Settings → Plugins → Install plugin**, choose the **Git URL** tab and enter:
-   ```
-   https://github.com/MatsCornegoor/orca-sbx.git#v0.2.0
-   ```
-2. Review the permissions and enable the plugin.
-3. Create a worktree. You get a "Creating Docker Sandbox…" notification, then "Docker Sandbox ready". The first sandbox takes a minute or two while the agent image downloads; later ones take about 10 seconds.
-
-Check it with `sbx ls`: the new sandbox is called `orca-<worktree>-<hash>`.
-
-When the plugin updates and adds new commands or permissions, Orca asks you to approve it again. Until you do, the plugin doesn't run.
-
-## Use it
-
-New terminals still open on your Mac. Pick one or more of these ways into the sandbox.
-
-### Quick Commands (recommended)
-
-Orca's Quick Commands (the ▶ button next to **+** in the tab bar) open a new tab and run a command in it. Add these two once, in **Settings → Quick Commands**, scoped globally. Paste each as one line.
-
-**Sandbox shell**
-
-```
-d=$(git rev-parse --show-toplevel) && c=$(git rev-parse --path-format=absolute --git-common-dir) && g=$(git rev-parse --absolute-git-dir) && { case "$c" in "$d"/*) set -- "$d" ;; *) mkdir -p "$c/logs"; set -- "$d" "${c}:ro" "$c/objects" "$c/refs" "$c/logs" "$g" ;; esac; } && n="orca-$(printf %s "$(basename "$d")" | tr -c 'A-Za-z0-9.-' '-')-$(printf %s "$d" | shasum | cut -c1-6)" && { sbx ls -q | grep -qx -- "$n" || sbx create --name "$n" claude "$@"; } && sbx exec -it -w "$PWD" "$n" bash -l
+```sh
+brew install --cask docker/tap/sbx
+curl -fsSL https://raw.githubusercontent.com/MatsCornegoor/orca-sbx/main/install.sh | sh
+orca-sbx setup
 ```
 
-**Claude in sandbox**
+The installer puts `orca-sbx` in `~/.local/bin`. If Homebrew refuses the Docker tap, run `brew trust docker/tap` first.
 
-```
-d=$(git rev-parse --show-toplevel) && c=$(git rev-parse --path-format=absolute --git-common-dir) && g=$(git rev-parse --absolute-git-dir) && { case "$c" in "$d"/*) set -- "$d" ;; *) mkdir -p "$c/logs"; set -- "$d" "${c}:ro" "$c/objects" "$c/refs" "$c/logs" "$g" ;; esac; } && n="orca-$(printf %s "$(basename "$d")" | tr -c 'A-Za-z0-9.-' '-')-$(printf %s "$d" | shasum | cut -c1-6)" && { sbx ls -q | grep -qx -- "$n" || sbx create --name "$n" claude "$@"; } && sbx run "$n"
-```
+`orca-sbx setup` is a one-time step. It:
 
-Then, in a worktree: ▶ → **Sandbox shell** or **Claude in sandbox**. The sandbox is created first if it doesn't exist yet.
+1. signs you in to Docker (`sbx` requires an account, even though sandboxes run locally),
+2. turns on `sbx`'s SSH access, which is experimental and off by default, and restarts the `sbx` daemon,
+3. runs `sbx setup ssh`, which adds one `Include` block to `~/.ssh/config` for `*.sbx` hosts,
+4. stores your GitHub login as `gh auth token`, so it follows `gh` on your Mac,
+5. tells you whether your Claude login is stored. If not: run `/login` once in a sandboxed Claude, or `sbx secret set anthropic`.
 
-### Keyboard shortcuts
+Running it again is safe.
 
-Open a terminal in the worktree, then:
+## Per project
 
-| Shortcut | Cmd+J command | Does |
-|---|---|---|
-| ⌘⌥B | Docker Sandbox: Open shell in sandbox | Opens a shell inside the sandbox |
-| ⌘⌥L | Docker Sandbox: Start Claude in sandbox | Starts Claude inside the sandbox |
-
-The plugin types the command into the worktree's **first** terminal; plugins can't tell which terminal is in front. With several terminals open, use Quick Commands instead.
-
-### zsh hook: every terminal in the sandbox (optional)
-
-For fully automatic setup: in a worktree that has a sandbox, every new Orca terminal opens inside it, and `claude` (including agents Orca launches) runs inside it.
-
-**Install from Orca:** Cmd+J → **Docker Sandbox: Install zsh hook**. It copies the hook to `~/.local/share/orca-sbx/`, backs up `~/.zshrc` to `~/.zshrc.orca-sbx.bak`, and adds one `source` line. The plugin keeps the copy up to date.
-
-**Or by hand:**
+In the project's folder (the main checkout or any of its worktrees):
 
 ```sh
-mkdir -p ~/.local/share/orca-sbx
-curl -fsSL https://raw.githubusercontent.com/MatsCornegoor/orca-sbx/v0.2.0/shell/orca-sbx.zsh \
-  -o ~/.local/share/orca-sbx/orca-sbx.zsh
-echo 'source ~/.local/share/orca-sbx/orca-sbx.zsh' >> ~/.zshrc
+orca-sbx
 ```
 
-Good to know:
+It creates a sandbox named after the repo (`My App` → `my-app`) and prints what to add in Orca:
 
-- It only acts in Orca terminals of linked worktrees that have a sandbox. Main checkouts and terminals outside Orca are untouched.
-- New terminals in those worktrees wait for `sbx ls`: about 2 seconds, longer when `sbx` is waking up, never more than 15.
-- zsh only (the macOS default).
-- Turn it off with `export ORCA_SBX=off` in `~/.zshenv`. Remove it with Cmd+J → **Docker Sandbox: Remove zsh hook**.
+**Settings → SSH → Add Target**
 
-### Inside the sandbox
+| Field | Value |
+|---|---|
+| Host | `my-app.sbx` |
+| Username | `agent` |
+| Identity file | leave empty |
 
-- `exit` takes you back to your Mac.
-- `hostname` shows the sandbox name and `uname -a` says Linux, so you can tell where you are.
-- The worktree is at the same path as on your Mac, and changes are shared both ways.
-- `git gc` doesn't work inside the sandbox; run it on your Mac.
-- Claude's sessions are stored inside the sandbox, not on your Mac.
+Then add the project on that target and create worktrees there. Running `orca-sbx` again only prints the target.
+
+### As an Orca Quick Command
+
+Add a Quick Command in **Settings → Quick Commands**, scoped globally:
+
+```
+orca-sbx
+```
+
+Then ▶ → that command in any project sets it up.
+
+## Commands
+
+| Command | Does |
+|---|---|
+| `orca-sbx` / `orca-sbx up` | Create this project's sandbox and print the SSH target |
+| `orca-sbx shell` | Open a shell in the sandbox, in the current folder |
+| `orca-sbx ls` | List the sandboxes made for Orca projects |
+| `orca-sbx stop [name]` | Stop this project's sandbox, or the named one |
+| `orca-sbx rm [name]` | Remove this project's sandbox, or the named one (asks first) |
+| `orca-sbx setup` | One-time setup, see above |
+
+You can also connect yourself with `ssh agent@my-app.sbx`. A stopped sandbox starts again when something connects.
+
+Settings, as environment variables:
+
+| Variable | Default | |
+|---|---|---|
+| `ORCA_SBX_AGENT` | `claude` | Agent the sandbox is made for: `codex`, `gemini`, `opencode`, `shell`, … |
+| `ORCA_WORKSPACES` | `~/orca/workspaces` | Where Orca puts worktrees |
 
 ## How it works
 
-| Orca event | Plugin runs |
-|---|---|
-| Worktree created | `sbx create --name orca-<worktree>-<hash> claude <worktree> <git mounts>` |
-| Worktree removed | `sbx rm --force orca-<worktree>-<hash>` |
+```sh
+sbx create --name my-app claude ~/orca/projects/my-app ~/orca/workspaces/my-app
+```
 
-The sandbox name is derived from the worktree path, so the plugin, Quick Commands, shortcuts and zsh hook all find the same sandbox without storing anything.
+Orca keeps a project's main checkout in one folder and its worktrees in `~/orca/workspaces/<repo>/`. The sandbox mounts both, at the same paths as on your Mac, so worktrees created later are inside it too, and git finds everything where it expects.
 
-### Git protection
+`sbx setup ssh` routes `*.sbx` hosts through a `ProxyCommand` that the `sbx` daemon answers. Orca sees the `ProxyCommand` and uses your system OpenSSH for those targets.
 
-A linked worktree's `.git` is a pointer into the main repo's `.git`, so the sandbox needs that folder. To stop the sandbox from planting git hooks or config that would run on your Mac, the main repo's `.git` is mounted **read-only**, with only what git needs to write on top:
-
-- `.git/objects`, `.git/refs`, `.git/logs`: commits, branches, stash, fetch
-- `.git/worktrees/<name>`: this worktree's `HEAD` and index
-
-This blocks writing to `.git/hooks`, `.git/config` and `git config`, while commit, branch, stash, fetch, pull and push keep working. Details and test results are in [testing.md](testing.md#git-protection).
+GitHub's token is only added to HTTPS requests, so `orca-sbx` sets git inside a new sandbox to use HTTPS for `git@github.com:` remotes. Your repo's config and your Mac don't change.
 
 ## Security
 
-The sandbox keeps your files out of reach, but treat it as a strong fence, not a vault:
+The sandbox keeps the rest of your Mac out of reach. Within a project, it's not a vault:
 
-- The worktree and `.git/worktrees/<name>` must stay writable, and both contain the pointer files git follows. Something in the sandbox could redirect those to a git folder it controls, which would then apply when git runs in that worktree on your Mac.
-- Sandboxes for **main checkouts** (made via Quick Commands or a shortcut) get no git protection, because their `.git` holds `HEAD` and the index.
-- Sandboxes created before v0.2.0 have a fully writable `.git`. Remove them with `sbx rm <name>` and recreate them with a Quick Command or shortcut.
+- **The project's `.git` is writable from the sandbox**, including `.git/hooks` and `.git/config`. Something in the sandbox could plant a hook that runs the next time git runs in that project on your Mac, including Orca's own background git calls. If you only use the project through the SSH target, git runs in the sandbox, not on your Mac.
+- **All worktrees of a project share one sandbox**, so they share one blast radius.
+- **`sbx` shares an agent-skills store across all sandboxes** by default. A skill written in one sandbox is visible in the others. See `sbx skills --help`.
+- **Credentials you add inside the sandbox yourself**, like running `gh auth login` there, are stored in the sandbox, not proxied.
 
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| "Plugin installation failed" | Check the URL ends in `#v0.2.0`. Make sure `git` works in a terminal. |
-| No sandbox after creating a worktree | Approve the plugin again in Settings → Plugins. Check `sbx ls` and that `sbx login` is done. |
-| "Not authenticated to Docker" | Run `sbx login`. |
-| Shortcut typed into the wrong terminal | Close the extra terminals, or use Quick Commands. |
-| New terminals are slow (zsh hook) | Expected: about 2 seconds per new terminal in a sandboxed worktree. Turn it off with `export ORCA_SBX=off` in `~/.zshenv`. |
-| Need Claude on your Mac instead (zsh hook) | Run `command claude`. |
-| A sandbox is left over | `sbx ls`, then `sbx rm <name>`. |
+| `the sandboxd SSH endpoint is disabled` | Run `orca-sbx setup`, or `sbx settings set feature.ssh true && sbx daemon restart && sbx setup ssh` |
+| `not signed in to Docker` | `sbx login` |
+| `user "…" not found` when connecting | Use `agent` as the username |
+| `orca-sbx: command not found` | Add `~/.local/bin` to your `PATH` |
+| `git push` asks for a password in the sandbox | Run `orca-sbx setup` to store the GitHub secret |
+| A worktree doesn't show up on your Mac | Check Orca put it under `~/orca/workspaces/<repo>`; anything else exists only inside the sandbox |
 
 ## Uninstall
 
-1. If you installed the zsh hook: Cmd+J → **Docker Sandbox: Remove zsh hook**.
-2. Settings → Plugins → remove **Docker Sandboxes**.
-3. Remove leftover sandboxes: `sbx ls`, then `sbx rm <name>` for each `orca-…` sandbox.
+```sh
+orca-sbx ls                      # then orca-sbx rm <name> for each
+sbx setup ssh remove             # removes the block from ~/.ssh/config
+rm ~/.local/bin/orca-sbx
+```
 
-## Limitations
-
-- **Unofficial workarounds:** Orca's plugin API has no permission to run programs yet. The plugin runs `sbx` and edits `~/.zshrc` (only when you ask) using plain Node, which works today but a future Orca release could block it.
-- **Agent status:** Orca may not show working/done status for Claude running in a sandbox. Not checked yet.
-- **Agent:** sandboxes are created for Claude. Change `AGENT` at the top of `main.mjs` for another agent (codex, gemini, opencode, …).
+Remove the SSH targets in Orca's settings as well.
 
 ## Development
 
-- **Load your clone:** Settings → Plugins → Development → add the folder. If a change doesn't take effect, turn the plugin off and on.
-- **Test notes:** everything we tried, what's tested where, and the options we rejected are in [testing.md](testing.md).
-- **Release:** bump `version` in `orca-plugin.json`, update the version in this README, commit, then:
-  ```sh
-  git tag -a v0.2.1 -m v0.2.1 && git push origin main v0.2.1
-  ```
+Clone the repo and run `./install.sh`: it links `~/.local/bin/orca-sbx` to your clone, so edits apply straight away. Install a specific version with `ORCA_SBX_REF=v0.3.0` in front of the `sh` in the install command.
