@@ -18,7 +18,7 @@ else
   tmp=$(mktemp)
   trap 'rm -f "$tmp"' EXIT
   curl -fsSL "$URL" -o "$tmp"
-  chmod +x "$tmp"
+  chmod 755 "$tmp"
   mv "$tmp" "$DEST"
   echo "Installed $DEST"
 fi
